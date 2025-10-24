@@ -1,10 +1,34 @@
 import torch
-from flash_attn.utils.benchmark import benchmark_forward
+import torch.utils.benchmark as benchmark
+
 # from sageattention.attn_qk_int8_per_block_hd128 import forward
 from sageattention.triton.attn_qk_int8_per_block import forward
 from sageattention.triton.attn_qk_int8_per_block_causal import forward as forward_causal
 
 import argparse
+
+# from flash_attn.utils.benchmark import benchmark_forward
+# remove flash_attn dependency
+def benchmark_forward(
+    fn, *inputs, repeats=10, desc="", verbose=True, amp=False, amp_dtype=torch.float16, **kwinputs
+):
+    """Use Pytorch Benchmark on the forward pass of an arbitrary function."""
+    if verbose:
+        print(desc, "- Forward pass")
+
+    def amp_wrapper(*inputs, **kwinputs):
+        with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=amp):
+            fn(*inputs, **kwinputs)
+
+    t = benchmark.Timer(
+        stmt="fn_amp(*inputs, **kwinputs)",
+        globals={"fn_amp": amp_wrapper, "inputs": inputs, "kwinputs": kwinputs},
+        num_threads=torch.get_num_threads(),
+    )
+    m = t.timeit(repeats)
+    if verbose:
+        print(m)
+    return t, m
 
 parser = argparse.ArgumentParser(description='Benchmark QK Int8 PV FP16 Triton')
 parser.add_argument('--batch_size', type=int, default=4, help='Batch size')
